@@ -5,7 +5,7 @@
 This project involves a **differential gene expression analysis** of blood samples from COVID-19 patients, bacterial pneumonia patients, and healthy individuals.
 It was developed as part of the *Omics Data Analysis* module in my Master’s in Bioinformatics and Biostatistics.
 
-The dataset was downloaded from the Gene Expression Omnibus database (GSE161731) and originates from the study: *McClain et al., Nature Communications, 2021* (DOI: 10.1038/s41467-021-21289-y). The analysis was conducted entirely in **R** using **Bioconductor** packages such as *SummarizedExperiment, edgeR* and *limma*.
+The dataset was downloaded from the Gene Expression Omnibus database (GSE161731) and originates from the study: *McClain et al., Nature Communications, 2021* (DOI: 10.1038/s41467-021-21289-y). The analysis was conducted entirely in **R** using **Bioconductor** packages such as *SummarizedExperiment, edgeR, limma* and *clusterProfiler*.
 
 Results show that bacterial infections triggered a **much stronger** and **more diverse transcriptomic response** than COVID-19 infections. In COVID-19 patients, overexpressed genes were primarily linked to cell cycle regulation and oligodendrocyte differentiation.
 
