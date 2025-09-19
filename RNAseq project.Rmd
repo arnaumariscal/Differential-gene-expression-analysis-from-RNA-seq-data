@@ -105,17 +105,17 @@ Two files are downloaded from GEO:
 
 ```{r, include=FALSE}
 #Directory creation
-dir.create("dades", showWarnings = FALSE)
+dir.create("data", showWarnings = FALSE)
 
 #Import the count matrix (called "comptatges") and the metadata (named "metadades") from the "dades" folder
-matriu_comptatges <- "dades/GSE161731_counts.csv.gz"
-metadades <- "dades/GSE161731_counts_key.csv.gz"
+matriu_comptatges <- "data/GSE161731_counts.csv.gz"
+metadades <- "data/GSE161731_counts_key.csv.gz"
 
 comptatges <- read.csv(matriu_comptatges, row.names = 1)
 metadades <- read.csv(metadades, row.names = 1)
 ```
 
-Both files are saved into the "dades" folder and imported from there. The count matrix contained 201 samples and 60,675 genes, while the metadata included 198 samples across eight variables (Output 1): subject_id, age, gender, race, cohort, time_since_onset, hospitalized, batch.
+Both files are saved into the "data" folder and imported from there. The count matrix contained 201 samples and 60,675 genes, while the metadata included 198 samples across eight variables (Output 1): subject_id, age, gender, race, cohort, time_since_onset, hospitalized, batch.
 
 ```{r, echo=FALSE, results='hold'}
 cat("Output 1. Count matrix and metadadata: number of genes and samples\n")
