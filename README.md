@@ -1,6 +1,6 @@
 # **Differential-gene-expression-analysis-from-RNA-seq-data**
 
-## 📌 Overview
+## 📑 Overview
 
 This project involves a **differential gene expression analysis** of blood samples from COVID-19 patients, bacterial pneumonia patients, and healthy individuals.
 It was developed as part of the *Omics Data Analysis* module in my Master’s in Bioinformatics and Biostatistics.
@@ -20,7 +20,7 @@ Results show that bacterial infections triggered a **much stronger** and **more 
  - Differential expression analysis with **voom + limma**
  - Over-representation analysis using Gene Ontology
 
-## 📊 Key results
+## 📚 Key results
 
 Differential expression profiles:
  - **COVID** vs **Healthy**. Overexpression of genes in healthy individuals, reduced activation in COVID-19 patients
