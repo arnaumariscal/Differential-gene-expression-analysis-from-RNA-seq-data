@@ -1,1 +1,0 @@
-"0","boxplot(age ~ cohort, data = as.data.frame(colData(my_se)), main=""Figure A5. Age distribution x cohort"")"

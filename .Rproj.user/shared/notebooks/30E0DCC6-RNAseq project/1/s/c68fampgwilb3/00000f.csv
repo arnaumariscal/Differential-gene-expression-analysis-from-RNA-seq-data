@@ -1,8 +1,0 @@
-"0","## Bacterial vs Healthy analysis"
-"0",""
-"0","# Volcanoplot"
-"0","volcanoplot(ml2, "
-"0","            coef = ""BacterialvsHealthy"", "
-"0","            highlight = 10,"
-"0","            names = rownames(ml2$coefficients),"
-"0","            main = ""Figure A8. Volcanoplot: Bacterial vs Healthy"")"

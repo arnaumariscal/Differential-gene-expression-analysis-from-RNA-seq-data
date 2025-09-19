@@ -1,2 +1,0 @@
-"0","table2<- table(colData(my_se)$gender, colData(my_se)$cohort)"
-"0","chi2<- chisq.test(table(colData(my_se)$gender, colData(my_se)$cohort))"

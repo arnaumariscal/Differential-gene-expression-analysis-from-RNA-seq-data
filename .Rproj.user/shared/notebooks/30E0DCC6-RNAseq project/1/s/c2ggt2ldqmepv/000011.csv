@@ -1,4 +1,0 @@
-"0",""
-"0","#MDS plot"
-"0","color <- dge_normal1$samples$color"
-"0","plotMDS(log_comptatges_norm, col = color, main = ""Figure A3. MDS plot"", cex = 0.7)"

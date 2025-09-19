@@ -1,1 +1,0 @@
-"0","plot(dendograma, labels = colnames(log_comptatges_norm), main = ""Figure A2. Hierarchical clustering of the samples"", cex = 0.8, cex.main = 1.4, font.main = 2)"

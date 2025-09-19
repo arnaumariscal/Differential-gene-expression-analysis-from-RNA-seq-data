@@ -1,2 +1,0 @@
-"0","table3<- table(colData(my_se)$batch, colData(my_se)$cohort)"
-"0","chi3<- chisq.test(table(colData(my_se)$batch, colData(my_se)$cohort))"

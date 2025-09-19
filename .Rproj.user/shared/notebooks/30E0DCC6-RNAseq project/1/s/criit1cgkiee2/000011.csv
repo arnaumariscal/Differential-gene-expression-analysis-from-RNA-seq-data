@@ -1,1 +1,0 @@
-"0","table4<- anova(lm(age ~ cohort, data = as.data.frame(colData(my_se))))"
