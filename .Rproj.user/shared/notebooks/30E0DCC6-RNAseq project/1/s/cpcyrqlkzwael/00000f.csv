@@ -1,0 +1,5 @@
+"0","# Bacterial vs Healthy"
+"0","bact_vs_health <- topTable(ml2, coef = ""BacterialvsHealthy"", sort.by = ""p"", number = nrow(ml2))"
+"0",""
+"0","# Covid vs Healthy"
+"0","covid_vs_health <- topTable(ml2, coef = ""COVIDvsHealthy"", sort.by = ""p"", number = nrow(ml2))"

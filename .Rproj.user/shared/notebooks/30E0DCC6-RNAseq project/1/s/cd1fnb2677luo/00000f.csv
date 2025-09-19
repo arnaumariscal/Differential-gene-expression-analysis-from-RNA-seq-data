@@ -1,0 +1,5 @@
+"0","dge1 <- DGEList("
+"0","  counts = assay(my_se),"
+"0","  samples = as.data.frame(colData(my_se)),"
+"0","  group = colData(my_se)$cohort,"
+"0","  genes = data.frame(nom_gens = rownames(assay(my_se))))"

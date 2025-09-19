@@ -1,0 +1,5 @@
+"0","voom_arnau <- voom(dge_normal2, matriu_disseny)"
+"0",""
+"0","ml <- lmFit(voom_arnau, matriu_disseny)"
+"0","ml2 <- contrasts.fit(ml, matriu_contrast)"
+"0","ml2 <- eBayes(ml2)"

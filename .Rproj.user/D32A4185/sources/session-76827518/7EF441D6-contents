@@ -1,0 +1,750 @@
+---
+title: "Differential gene expression analysis from RNA seq data"
+author: "Arnau Mariscal Puig"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+# Document configuration
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  message = FALSE, 
+  warning = FALSE)
+```
+
+```{r paquets, include=FALSE}
+# Installation of BiocManager if not already installed
+if(!require(BiocManager)){
+      install.packages("BiocManager", dep=TRUE)
+}
+
+installifnot <- function (paquet, BioC=TRUE){
+  if(BioC){
+    if(!require(paquet, character.only=TRUE)){
+      BiocManager::install(paquet)
+    }
+  }else{
+    if(!require(paquet, character.only=TRUE)){
+      install.packages(paquet, dep=TRUE)
+    }
+  }
+}
+
+# If needed, install the following Bioconductor packages
+installifnot("SummarizedExperiment")
+installifnot("EnsDb.Hsapiens.v86")
+installifnot("org.Hs.eg.db")
+installifnot("clusterProfiler")
+
+# If needed, install the following CRAN packages
+installifnot("dplyr", BioC = FALSE)
+installifnot("tidyr", BioC = FALSE)
+installifnot("stringr", BioC = FALSE)
+installifnot("ggplot2", BioC = FALSE)  
+
+# Other useful packages
+installifnot("limma")
+installifnot("edgeR")
+installifnot("ggrepel", BioC = FALSE)
+installifnot("pheatmap", BioC = FALSE)
+```
+
+```{r llibreries, include=FALSE}
+# Library loading
+library(SummarizedExperiment)
+library(EnsDb.Hsapiens.v86)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(stringr)
+library(ggplot2)
+library(limma)
+```
+
+# 1. Introduction
+
+This project involves a differential gene expression analysis of blood samples from COVID-19 patients, bacterial pneumonia patients, and healthy individuals.
+
+The dataset comes from McClain et al., who analyzed blood samples from patients with COVID-19 and compared them with other respiratory infections. To simplify the analysis, this project focuses only on three groups: COVID-19, bacterial pneumonia, and healthy controls (1).
+
+## 1.1. Objectives
+
+The primary objective of this project is to carry out a differential gene expression analysis using RNA-seq data. More specifically, we aim to analyze transcriptomic data from peripheral blood samples to compare gene expression between COVID-19 patients, bacterial pneumonia patients, and healthy individuals.
+
+The secondary objectives are:
+
+-   To build a **SummarizedExperiment** object from GEO data, including count data, metadata, and gene coordinates.
+
+-   Preprocess, transform, and normalize the data to run an exploratory analysis and detect outlier samples and confounding variables.
+
+-   Identify differentially expressed genes between groups: healthy, COVID-19, and Bacterial.
+
+-   Interpret the biological significance of the results.
+
+# 2. Methods
+
+The data was downloaded from the Gene Expression Omnibus (GEO) database, under accession **GSE161731** (2). The full analysis was done using **Bioconductor**.
+
+## 2.1. Data acquisition and Summarized Experiment creation
+
+Two files are downloaded from GEO:
+
+-   GSE161731_counts.csv.gz: contains the count matrix with the gene expression data.
+
+-   GSE161731_key.csv.gz: contains the metadata of the samples.
+
+```{r, include=FALSE}
+#Directory creation
+dir.create("data", showWarnings = FALSE)
+
+#Import the count matrix (called "comptatges") and the metadata (named "metadades") from the "dades" folder
+matriu_comptatges <- "data/GSE161731_counts.csv.gz"
+metadades <- "data/GSE161731_counts_key.csv.gz"
+
+comptatges <- read.csv(matriu_comptatges, row.names = 1)
+metadades <- read.csv(metadades, row.names = 1)
+```
+
+Both files are saved into the "data" folder and imported from there. The count matrix contained 201 samples and 60,675 genes, while the metadata included 198 samples across eight variables (Output 1): subject_id, age, gender, race, cohort, time_since_onset, hospitalized, batch.
+
+```{r, echo=FALSE, results='hold'}
+cat("Output 1. Count matrix and metadadata: number of genes and samples\n")
+cat("\n• Count matrix (genes x samples): \n")
+dim(comptatges)
+cat("\n• Metadata (genes x samples): \n")
+dim(metadades)
+
+```
+
+Since sample names had a different format in each file, they were standardized to ensure consistency. After keeping a common format, only samples present in both files were kept, resulting in 198 in total.
+
+```{r, include=FALSE}
+# For the count matrix: remove the X from numeric sample names and replace dots with dashes in letter-based sample names
+
+colnames(comptatges) <- sub("^X", "", colnames(comptatges))
+colnames(comptatges) <- sub("\\.", "-", colnames(comptatges))
+
+# Find common samples in both the count matrix and the metadata
+mostres_comunes <- intersect(colnames(comptatges), rownames(metadades))
+
+# Keep only the common samples in both matrices
+comptatges_filtrat <- comptatges[, mostres_comunes]
+metadades_filtrat <- metadades[mostres_comunes, ]
+
+dim(comptatges_filtrat)
+dim(metadades_filtrat)
+
+# Check that the number of samples is the same in the count matrix and the metadata
+all.equal(colnames(comptatges_filtrat), rownames(metadades_filtrat))
+```
+
+To facilitate data visualization in later plots, a *Shortname* is used to label each sample by combining its cohort name and a sequential number. A color is also assigned to each cohort. Shortnames are applied to both the metadata and the count matrix.
+
+```{r, include=FALSE}
+#Shortname is created: cohort name + sequential number
+metadades_filtrat$shortname <- paste(metadades_filtrat$cohort, seq_along(metadades_filtrat$cohort), sep = "_")
+
+#A  color is assigned  to each of the cohorts
+metadades_filtrat$color <- NA
+
+for (i in 1:nrow(metadades_filtrat)) {
+  if (metadades_filtrat$cohort[i] == "COVID-19") {metadades_filtrat$color[i] <- "pink"}
+  else if (metadades_filtrat$cohort[i] == "Bacterial") {metadades_filtrat$color[i] <- "blue"}
+  else if (metadades_filtrat$cohort[i] == "healthy") {metadades_filtrat$color[i] <- "green"}
+  else {metadades_filtrat$color[i] <- "gray"}}
+
+# Name of the samples = Shortname 
+metadades_filtrat$nom_mostra <- rownames(metadades_filtrat)
+rownames(metadades_filtrat) <- metadades_filtrat$shortname
+metadades_filtrat$shortname <- NULL
+colnames(comptatges_filtrat) <- rownames(metadades_filtrat)
+```
+
+Genomic coordinates are also added using the **EnsDb.Hsapiens.v86** package. Only genes with available genomic coordinates are kept.
+
+Finally, a SummarizedExperiment object is created, integrating gene counts, metadata and genomic coordinates (3). This object is the basis of the analysis, with 57,602 genes and 198 samples (Output 2).
+
+```{r, include=FALSE}
+library(EnsDb.Hsapiens.v86) # (4)
+library(GenomicRanges)
+
+# Get the genomic coordinates of all genes
+anotacio <- genes(EnsDb.Hsapiens.v86)
+
+# Keep only genes from the count matrix that have genomic coordinates
+gens_comuns <- intersect(rownames(comptatges_filtrat), names(anotacio))
+
+comptatges_filtrat <- comptatges_filtrat[gens_comuns, ]
+rangs_gen <- anotacio[gens_comuns]
+
+rangs_gen <- anotacio[match(gens_comuns, names(anotacio))]
+# Ensure the order and names of the samples of the annotation match the ones in 'comptatges_filtrat'
+```
+
+```{r, echo=FALSE, results='hold'}
+my_se <- SummarizedExperiment(
+  assays = list(counts = as.matrix(comptatges_filtrat)),
+  colData = metadades_filtrat,
+  rowRanges = rangs_gen
+)
+
+cat("Output 2. SummarizedExperiment object: counts + metadata + genomic coordinates \n\n")
+show(my_se)
+```
+
+## 2.2. Metadata cleaning and cohort selection
+
+Next, the *dplyr* package is used for metadata cleaning (5):
+
+-   Only COVID-19, Bacterial and Healthy samples are kept
+
+-   Duplicate samples are removed, keeping the first entry
+
+-   Variables are standardized: age is converted to numeric, and text variables are cleaned (spaces, dashes, and slashes replaced with underscores).
+
+-   There is a random selection of 75 samples, using a reproducible seed derived from the string "random".
+
+Taking this into account, the SummarizedExperiment is updated.
+
+```{r, include=FALSE}
+metadades_finals <- metadades_filtrat %>%
+  # only COVID-19, Bacterial and healthy samples are kept
+  dplyr::filter(cohort %in% c("COVID-19", "Bacterial", "healthy")) %>%
+  
+  # Duplicate samples are eliminated (taking into account the original name, no the given shortname)
+  distinct(nom_mostra, .keep_all = TRUE) %>%
+  
+  # Standarization
+  mutate(age = str_replace_all(as.character(age), "[^0-9.]", "")) %>%
+  mutate(age = as.numeric(age)) %>%
+  mutate(gender = as.factor(gender)) %>%
+  mutate(race = as.factor(race)) %>%
+  mutate(batch = as.factor(batch)) %>%
+  mutate(across(where(is.character), ~ str_replace_all(., c(" " = "_", "-" = "_", "/" = "_")))) %>%
+  mutate(across(where(is.factor), ~ factor(str_replace_all(as.character(.), c(" " = "_", "-" = "_", "/" = "_")))))
+
+# Random seed
+myseed <- sum(utf8ToInt("arnaumariscalpuig"))
+set.seed(myseed)
+
+# Only 75 samples are kept
+mostres_aleatories <- sample(rownames(metadades_finals), size = 75)
+metadades_finals <- metadades_finals[mostres_aleatories, ]
+
+# update SummarizedExperiment
+my_se <- my_se[, colnames(my_se) %in% rownames(metadades_finals)]
+metadades_ordenades <- metadades_finals[match(colnames(my_se), rownames(metadades_finals)), ]
+colData(my_se) <- DataFrame(metadades_ordenades)
+dim(my_se)
+```
+
+## 2.3. Data preprocessing and transformation
+
+### 2.3.1 Gene filtering
+
+Before filtering low-expression genes, counts are normalized to CPM (counts per million) using **edgeR** to make samples comparable despite differences in sequencing depth (in other words, not all samples have the same number of reads, as can bee seen in Output 3).
+
+```{r, echo=FALSE, results='hold'}
+
+cat("Output 3. Number of counts per sample (first 5 samples)\n\n")
+
+colSums(assay(my_se)[, 1:5])
+```
+
+Next, genes with low expression are removed, since they provide little information to the analysis, thereby increasing the power to detect meaningful differences between other genes. Only genes with CPM > 0.5 in at least two samples are kept. After filtering, the SummarizedExperiment contains 24,934 genes.
+
+```{r, include=FALSE}
+library(edgeR)
+
+# Calculate CPMs
+comptatges_cpm <- cpm(assay(my_se))
+
+# Gene filtering with low expression
+llindar<- comptatges_cpm >0.5
+mantenim<- rowSums(llindar) >= 2
+
+# Update SE
+my_se <- my_se[mantenim, ]
+dim(my_se)
+```
+
+### 2.3.2. Normalization
+
+Up until now, data has been managed using the SummarizedExperiment object. However, to better handle sequencing data, the **DGElist** class from the **edgeR** package will be more useful. This structure stores count data, metadata, and gene information, also allowing to apply normalization and differential analysis functions brought by edgeR.
+
+```{r, include=FALSE}
+dge1 <- DGEList(
+  counts = assay(my_se),
+  samples = as.data.frame(colData(my_se)),
+  group = colData(my_se)$cohort,
+  genes = data.frame(nom_gens = rownames(assay(my_se))))
+```
+
+Since count data are not normally distributed, a log transformation is applied to stabilize variance and facilitate comparisons between samples. An initial exploration using boxplot indicates that most samples have similar distributions, although some outliers are observed (Figure 1).
+
+```{r, echo=FALSE}
+# Log transformation of CPMs
+log_comptatges <- cpm(dge1,log=TRUE)
+
+# Sample distribution using boxplot
+boxplot(log_comptatges, 
+        ylab="Log2-CPM",
+        las=2, 
+        xlab="", 
+        cex.axis=0.8, 
+        main="Figure 1. Boxplots of log2-CPM (*unnormalized)")
+abline(h=median(log_comptatges), col="green") 
+```
+
+Normalization is then performed using **TMM** (Trimmed Mean of M-values) via calcNormFactors() in edgeR. This corrects biases related to library composition, which means that some genes might be highly expressed in certain conditions, so this function ensures fair comparisons between samples.
+
+After normalization, another boxplot shows a more similar distribution across samples (Figure 2). However, sample COVID-19_50 still seems to be an outlier, with a median noticeably lower than the general one.
+
+```{r, echo=FALSE}
+dge_normal1<- calcNormFactors(dge1)
+
+# Boxplot of normalized data
+log_comptatges_norm <- cpm(dge_normal1,log=TRUE)
+
+boxplot(log_comptatges_norm, 
+        ylab="Log2-CPM",
+        las=2, 
+        xlab="", 
+        cex.axis=0.7, 
+        main="Figure 2. Boxplots of log2-CPM (*normalized)")
+abline(h=median(log_comptatges_norm), col="green")
+```
+
+## 2.4. Exploratory analysis
+
+After normalization, an exploratory analysis is performed to evaluate data quality. This step helps assess if samples from the same cohort (COVID-19, Bacterial, or Healthy) group together, or if there are any batch effects influencing the results. It also allows us to identify patterns related to confounding variables and help detect outliers.
+
+A distance matrix is created, with pairwise comparisons between all samples using the log-transformed data. From this, the following plots are generated:
+
+-   *Heatmap of the distance matrix* (Annex, Figure A1): It is used to observe similarity patterns between samples and detect if any sample differs from the rest or fails to group with its cohort.
+
+-   *Dendrogram* (Annex, Figure A2): shows hierarchical clustering of the samples and allows visualization of groupings by cohort.
+
+-   *MDS* (Multidimensional Scaling) plot (Annex, Figure A3): represents the samples in a two-dimensional space according to their similarity.
+
+-   *PCA* plot (Annex, Figure A4): to represent variability among samples and quantify how much of it is explained by the first components (PC1 and PC2). PCA also helps explore variability related to factors such as cohort, sex, age, race, or batch.
+
+```{r, include=FALSE}
+matriu_dist<- dist(t(log_comptatges_norm))
+
+# Heatmap
+library(factoextra)
+plot_heatmap<- fviz_dist(matriu_dist) + ggtitle("Figure A1. Heatmap") + theme(plot.title = element_text(size = 16, face = "bold"))
+
+#Dendogram
+dendograma <- hclust(matriu_dist)
+plot(dendograma, labels = colnames(log_comptatges_norm), main = "Figure A2. Hierarchical clustering of the samples", cex = 0.8)
+
+#MDS plot
+color <- dge_normal1$samples$color
+plotMDS(log_comptatges_norm, col = color, main = "Figure A3. MDS plot", cex = 0.7)
+
+#PCA
+pca <- prcomp(t(log_comptatges_norm), scale. = TRUE)  # log_comptatges_norm needs to be transposed, since columns must represent samples
+
+loads <- round((pca$sdev^2 / sum(pca$sdev^2)) * 100, 1) # percentage of variance explained
+
+# Create a dataframe that combines sample coordinates with metadata
+pc_df <- as.data.frame(pca$x)
+pc_df$mostra_id <- colnames(log_comptatges_norm)
+info_metadades <- as.data.frame(colData(my_se)) 
+pc_df <- cbind(pc_df, info_metadades)
+
+# PCA x cohort
+pca_cohort<- ggplot(pc_df, aes(x = PC1, y = PC2, color = cohort)) +
+  geom_point(size = 2) +
+  labs(title = "Figure A4 (A). PCA x cohort",
+       x = paste0("PC1 (", loads[1], "%)"),
+       y = paste0("PC2 (", loads[2], "%)")) +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"))
+
+# PCA x batch
+pca_batch<- ggplot(pc_df, aes(x = PC1, y = PC2, color = batch)) +
+  geom_point(size = 2) +
+  labs(title = "Figure A4 (B). PCA x batch") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"))
+
+# PCA x sexe
+pca_sex<- ggplot(pc_df, aes(x = PC1, y = PC2, color = gender)) +
+  geom_point(size = 2) +
+  labs(title = "Figure A4 (C). PCA x sex")  +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"))
+
+# PCA x race
+pca_race<- ggplot(pc_df, aes(x = PC1, y = PC2, color = race)) +
+  geom_point(size = 2) +
+  labs(title = "Figure A4 (D). PCA x race")  +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"))
+
+# PCA x edat
+pca_age<- ggplot(pc_df, aes(x = PC1, y = PC2, color = age)) +
+  geom_point(size = 2) +
+  scale_color_gradient(low = "blue", high = "red") +
+  labs(title = "Figure A4 (E). PCA x age")  +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"))
+
+```
+
+The results of the three plots (heatmap, dendrogram, and MDS plot) show that samples from the Bacterial cohort tend to cluster, while samples from the Healthy and COVID-19 cohorts are mixed together. This pattern is most clearly visible in the MDS plot.
+
+In addition, sample COVID-19_50 behaves atypically: in the previous boxplots it showed a median noticeably lower than the global median, while in the MDS plot it is represented far from the rest of the samples. Therefore, it is removed from the following analyses to ensure a clearer interpretation.
+
+```{r, include=FALSE}
+outlier <- c("COVID-19_50")
+
+# Outliers are removed
+my_se <- my_se[, !colnames(my_se) %in% outlier]
+
+# Update DGElist
+dge2 <- DGEList(
+  counts = assay(my_se),
+  samples = as.data.frame(colData(my_se)),
+  group = colData(my_se)$cohort,
+  genes = data.frame(nom_gens = rownames(assay(my_se)))
+)
+```
+
+## 2.5. Identification of Confounding Variables
+
+To identify potential confounding variables, we consider the results from PCA, contingency tables, and their associated statistical tests:
+
+-   **Race** (Annex, Table A1). The contingency table shows that most COVID-19 samples belong to the White race, while most Bacterial samples belong to the Black race. The PCA plot also reveals a separation between the two groups. Although the requirements for a chi-square test are not met, the uneven distribution suggests that **race could be considered a confounding variable**.
+
+```{r, include=FALSE}
+table1<- table(colData(my_se)$race, colData(my_se)$cohort)
+chi1<- chisq.test(table(colData(my_se)$race, colData(my_se)$cohort))
+```
+
+-   **Gender** (Annex, Table A2). The chi-square test does not show significant differences between gender and cohort, and the PCA does not reveal a clear pattern either. Therefore, gender is **not considered a confounding variable**.
+
+```{r, include=FALSE}
+table2<- table(colData(my_se)$gender, colData(my_se)$cohort)
+chi2<- chisq.test(table(colData(my_se)$gender, colData(my_se)$cohort))
+```
+
+-   **Batch** (Annex, Table A3). Most samples belong to batch 1. Even though the requirements for a chi-square test are not met, the unequal distribution suggests that batch **could be considered a confounding variable**.
+
+```{r, include=FALSE}
+table3<- table(colData(my_se)$batch, colData(my_se)$cohort)
+chi3<- chisq.test(table(colData(my_se)$batch, colData(my_se)$cohort))
+```
+
+-   **Age** (Annex, Figure A5 and Table A4). It's the only quantitative variable. The PCA does not show a clear effect, but when age distribution is represented in a boxplot and an ANOVA test is performed, significant differences are observed. Therefore, **age is considered a confounding variable**.
+
+```{r, include=FALSE}
+boxplot(age ~ cohort, data = as.data.frame(colData(my_se)), main="Figure A5. Age distribution x cohort")
+table4<- anova(lm(age ~ cohort, data = as.data.frame(colData(my_se))))
+```
+
+## 2.6. Design and contrast matrices
+
+Even though the initial plan was to adjust the model for several confounding variables, adding *batch* and *race* to the design matrix caused collinearity problems with the cohort or clinical condition (labeled as "group"). This collinearity removed the “healthy” group, making it impossible to define the contrast matrix. Therefore, the final model was adjusted only for **age** and **clinical condition (group)**, in order to identify differentially expressed genes between the healthy, COVID-19, and bacterial cohorts (Output 4).
+
+```{r, include=FALSE}
+# Update DGE list again
+dge_normal2<- calcNormFactors(dge2)
+log_comptatges_norm2 <- cpm(dge_normal2,log=TRUE)
+
+#Make sure right format of variables
+dge_normal2$samples$group <- factor(dge_normal2$samples$group, levels = c("COVID_19", "Bacterial", "healthy"))
+dge_normal2$samples$age <- as.numeric(dge_normal2$samples$age)
+
+# Building of the Design matrix taking into account the chosen confounding variables.
+matriu_disseny <- model.matrix(~0 + age + group, data = dge_normal2$samples)
+
+# Rewriting of column names (otherwise problems come up later in the code)
+colnames(matriu_disseny) <- gsub("group", "", colnames(matriu_disseny))
+colnames(matriu_disseny) <- gsub("-", "_", colnames(matriu_disseny))
+```
+
+```{r, echo=FALSE, results='hold'}
+# Contrast matrix
+matriu_contrast <- makeContrasts(
+  COVIDvsHealthy = COVID_19 - healthy,
+  BacterialvsHealthy = Bacterial - healthy,
+  levels = colnames(matriu_disseny)
+)
+
+cat("Output 4. Contrast matrix\n\n")
+print(matriu_contrast)
+```
+
+### 2.6.1. Voom transformation
+
+The next step is to proceed to the differential expression analysis using **voom+limma**. The voom transformation converts count data into continuous log-CPM values with associated precision weights, which improve variance estimation and allow the use of linear models to detect differentially expressed genes.
+
+So, after transforming the normalized DGEList object (dge_normal2) with the voom() function and the design matrix, log-CPM values with associated precision weights are obtained. The linear model in limma is then fit to the log-CPM values, with the weights applied, using the design and contrast matrices to perform group comparisons.
+
+Finally, the eBayes() function is applied to stabilize error estimation and improve the detection of differentially expressed genes.
+
+```{r, include=FALSE}
+voom_arnau <- voom(dge_normal2, matriu_disseny)
+
+ml <- lmFit(voom_arnau, matriu_disseny)
+ml2 <- contrasts.fit(ml, matriu_contrast)
+ml2 <- eBayes(ml2)
+```
+
+# 3. Results
+
+## 3.1. Differential Gene Expression Profiles
+
+The **topTable()** function generates a table with statistical results for each contrast. The **volcano plots** help visualize these results, while the **heatmaps** allow observation of expression profiles based on selected sets of genes.
+
+```{r, include=FALSE}
+# Bacterial vs Healthy
+bact_vs_health <- topTable(ml2, coef = "BacterialvsHealthy", sort.by = "p", number = nrow(ml2))
+
+# Covid vs Healthy
+covid_vs_health <- topTable(ml2, coef = "COVIDvsHealthy", sort.by = "p", number = nrow(ml2))
+```
+
+### 3.1.1. COVID vs Healthy
+
+```{r, include=FALSE}
+## COVID vs Healthy analysis
+
+# Volcanoplot
+volcanoplot(ml2, 
+            coef = "COVIDvsHealthy", 
+            highlight = 10,
+            names = rownames(ml2$coefficients),
+            main = "Figure A6. Volcanoplot: COVID-19 vs Healthy")
+abline(v = c(-1.5, 1.5), col = "red", lty = 2)  # log2FC thresholds
+
+# Heatmap
+gens_top1 <- rownames(subset(covid_vs_health, (abs(logFC) > 1.5) & (adj.P.Val < 0.05))) 
+
+library(pheatmap)
+map <- log_comptatges_norm2[gens_top1, ]
+map <- map - rowMeans(map)
+pheatmap(map, fontsize_col = 14, fontsize_row = 1, main = "Figure A7. Heatmap: COVID-19 vs Healthy")
+
+```
+
+The volcano plot appears asymmetric and concentrated, with most differentially expressed genes located on the left side (Annex, Figure A6). In the heatmap, a clear pattern is seen: genes are predominantly **overexpressed in the Healthy group**, while they tend to be underexpressed in the COVID group (Annex, Figure A7).
+
+### 3.1.2. Bacterial vs Healthy
+
+```{r, include=FALSE}
+## Bacterial vs Healthy analysis
+
+# Volcanoplot
+volcanoplot(ml2, 
+            coef = "BacterialvsHealthy", 
+            highlight = 10,
+            names = rownames(ml2$coefficients),
+            main = "Figure A8. Volcanoplot: Bacterial vs Healthy")
+abline(v = c(-1.5, 1.5), col = "red", lty = 2)  # log2FC thresholds
+
+# Heatmap
+gens_top2 <- rownames(subset(bact_vs_health, (abs(logFC) > 1.5) & (adj.P.Val < 0.05)))
+
+library(pheatmap)
+map2 <- log_comptatges_norm2[gens_top2, ]
+map2 <- map2 - rowMeans(map2)
+pheatmap(map2, fontsize_col = 14, fontsize_row = 1, main =  "Figure A9. Heatmap: Bacterial vs Healthy")
+```
+
+In this comparison, the volcano plot appears more symmetric and less concentrated (Annex, Figure A8). Differentially expressed genes are mainly found on the right side. In the heatmap, two distinct gene clusters can be observed for the Bacterial group (Annex, Figure A9): one with clearly underexpressed genes (upper section of the plot) and another with clearly overexpressed genes (lower section), compared to the COVID and Healthy groups.
+
+### 3.1.3. Multiple Comparison
+
+The number of differentially expressed genes in each comparison can also be assessed using the **decideTests** function and visualized with a **Venn diagram**.
+
+A total of 496 genes were found differentially expressed in the COVID vs Healthy contrast, 3619 genes in the Bacterial vs Healthy contrast, and 275 genes were shared between the two comparisons (Figure 3).
+
+```{r, echo = FALSE}
+summa.fit <- decideTests(ml2, p.value = 0.05, lfc = 1.5)
+
+vc<- vennCounts(summa.fit)
+
+vennDiagram(vc,
+            include=c("up", "down"),
+            counts.col=c("red", "blue"),
+            circle.col = c("red", "blue", "green3"), 
+            cex=c(1,1,1),
+            main = "Figure 3. Venn Diagram of differentially expressed genes")
+```
+
+## 3.2. Biologic significance
+
+Finally, an **over-representation analysis** is performed to identify biological processes (from Gene Ontology) related to overexpressed genes in COVID-19 compared to healthy samples. To do so, gene identifiers need to be in *Entrez ID* format rather than ENSEMBL IDs, so the **org.Hs.eg.db** package is used for conversion.
+
+```{r, include=FALSE}
+#Obtain selected gens and genes to be analyzed 
+covid_vs_health <- topTable(ml2, coef = "COVIDvsHealthy", sort.by = "p", number = nrow(ml2))
+
+gens_top1 <- subset(covid_vs_health, (logFC > 1.5) & (adj.P.Val < 0.05))
+
+gens_seleccionats<- rownames(gens_top1)
+gens_analitzats<- rownames(covid_vs_health)
+
+#Selected genes (upregulated)
+gens_seleccionats_entrez <- bitr(gens_seleccionats, 
+                            fromType = "ENSEMBL", 
+                            toType = "ENTREZID", 
+                            OrgDb = org.Hs.eg.db)
+
+#Genes to be analyzed
+gens_analitzats_entrez <- bitr(gens_analitzats, 
+                            fromType = "ENSEMBL", 
+                            toType = "ENTREZID", 
+                            OrgDb = org.Hs.eg.db)
+
+#enrichGO analysis
+egoda <- enrichGO(gene = gens_seleccionats_entrez$ENTREZID,
+                universe = gens_analitzats_entrez$ENTREZID,
+                OrgDb = org.Hs.eg.db,
+                keyType = "ENTREZID",
+                ont = "BP",
+                pAdjustMethod = "BH",
+                qvalueCutoff = 0.05,
+                readable = TRUE)
+
+#Biologic significance analysis plots
+dotplot(egoda, showCategory=9, font.size=6)
+cnetplot(egoda, font.size=5)
+```
+
+The analysis reveals that these genes are mainly involved in cell cycle regulation and in controlling oligodendrocyte differentiation (Annex, Figure A10). A network plot highlights key genes such as FOXM1, MELK, PKMYT1, CCNB2, and SPC24 in cell cycle processes, and HES1 and TMEM98 in oligodendrocyte differentiation (Annex, Figure A11).
+
+# 4. Discussion and conclusions
+
+In this project, a differential gene expression analysis was performed on samples from COVID-19 patients, bacterial infection patients, and healthy individuals to identify differentially expressed genes and explore their biological significance.
+
+The analysis showed different gene activity between groups. In the COVID-19 vs healthy comparison, there was an overexpression of genes in healthy individuals, with a more limited activation in COVID-19 patients. In contrast, the Bacterial vs healthy comparison showed two clear groups of genes in bacterial samples, with some highly overexpressed and others underexpressed. Notably, the number of differentially expressed genes was seven times higher in the bacterial comparison than the covid one, indicating the immune response at a transcriptomic level is more diverse and intense. Shared genes between comparisons probably show common immune mechanisms.
+
+Regarding the over-representation analysis related to overexpressed genes in COVID-19 vs healthy samples, it indicated these overexpressed genes in COVID-19 patients are involved in cell proliferation and oligodendrocyte differentiation, which could be related to the immune response against viral infection.
+
+Some limitations should be considered. Confounding variables such as race and batch were not fully explored, and sample distribution across groups was uneven (e.g., most bacterial samples were from Black individuals and most COVID samples from White individuals). Therefore, future studies could incorporate these variables and ensure a more balanced sampling to improve the analysis.
+
+# 5. Bibliography
+
+1.  McClain MT, Constantine FJ, Henao R, Liu Y, Tsalik EL, Burke TW, Steinbrink JM, Petzold E, Nicholson BP, Rolfe R, Kraft BD, Kelly MS, Saban DR, Yu C, Shen X, Ko EM, Sempowski GD, Denny TN, Ginsburg GS, Woods CW. Dysregulated transcriptional responses to SARS-CoV-2 in the periphery. Nat Commun. 2021 Feb 17;12(1):1079. doi: 10.1038/s41467-021-21289-y. PMID: 33597532; PMCID: PMC7889643.
+
+2.  GEO accession viewer [Internet]. GSE161731. National Center for Biotechnology Information. Available from: <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE161731>
+
+3.  SummarizedExperiment: Bioconductor package vignette [Internet]. Bioconductor. Available from: <https://www.bioconductor.org/packages/devel/bioc/vignettes/SummarizedExperiment/inst/doc/SummarizedExperiment.html>
+
+4.  EnsDb.Hsapiens.v86: Bioconductor annotation data [Internet]. Bioconductor. Available from: <https://bioconductor.org/packages/release/data/annotation/html/EnsDb.Hsapiens.v86.html>
+
+5.  dplyr tutorial [Internet]. RPubs. Available from: <https://rpubs.com/justmarkham/dplyr-tutorial>
+
+6.  AMV Casos: Ejemplo PCA 2 detección del efecto batch en datos de microarrays [Internet]. ASPteaching. Available from: <https://aspteaching.github.io/AMVCasos/#ejemplo-pca-2-detecci%C3%B3n-del-efecto-batch-en-datos-de-microarrays>
+
+7.  Omics Data Analysis – Case Study 1: Microarrays [Internet]. GitHub repository. ASPteaching. Available from: <https://github.com/ASPteaching/Omics_Data_Analysis-Case_Study_1-Microarrays>
+
+8.  Análisis de datos ómicos – Ejemplo 2 RNASeq [Internet]. GitHub repository. ASPteaching. Available from: <https://github.com/ASPteaching/Analisis_de_datos_omicos-Ejemplo_2-RNASeq>
+
+9.  Workflow básico de RNASeq: Preprocesado de los datos [Internet]. ASPteaching. Available from: <https://aspteaching.github.io/Analisis_de_datos_omicos-Ejemplo_2-RNASeq/Workflow_basico_de_RNASeq.html#5_Preprocesado_de_los_datos>
+
+
+# 6. Annex
+
+```{r annex1, echo = FALSE, results='hold'}
+plot_heatmap
+plot(dendograma, labels = colnames(log_comptatges_norm), main = "Figure A2. Hierarchical clustering of the samples", cex = 0.8, cex.main = 1.4, font.main = 2)
+plotMDS(log_comptatges_norm, col = color, main = "Figure A3. MDS plot", cex = 0.7, cex.main = 1.4, font.main = 2)
+pca_cohort
+pca_batch
+pca_sex
+pca_race
+pca_age
+```
+
+\large \textbf{Table A1. Contingency table and chi-squared test x Race}
+
+```{r annex21, echo = FALSE, results='hold'}
+table1
+chi1
+```
+
+\large \textbf{Table A2. Contingency table and chi-squared test x Gender}
+
+```{r annex22, echo = FALSE, results='hold'}
+table2
+chi2
+```
+
+\large \textbf{Table A3. Contingency table and chi-squared test x Batch}
+
+```{r annex23, echo = FALSE, results='hold'}
+table3
+chi3
+```
+
+\large \textbf{Table A4. ANOVA test x Age}
+
+```{r annex24, echo = FALSE}
+table4
+```
+
+```{r, echo = FALSE}
+boxplot(age ~ cohort, data = as.data.frame(colData(my_se)), main="Figure A5. Age distribution x cohort")
+```
+
+```{r annex3, echo = FALSE, results='hold'}
+## COVID vs Healthy analysis
+
+# Volcanoplot
+volcanoplot(ml2, 
+            coef = "COVIDvsHealthy", 
+            highlight = 10,
+            names = rownames(ml2$coefficients),
+            main = "Figure A6. Volcanoplot: COVID-19 vs Healthy", cex.main = 1.4, font.main = 2)
+abline(v = c(-1.5, 1.5), col = "red", lty = 2)  # log2FC thresholds
+
+# Heatmap
+gens_top1 <- rownames(subset(covid_vs_health, (abs(logFC) > 1.5) & (adj.P.Val < 0.05))) 
+
+
+library(pheatmap)
+map <- log_comptatges_norm2[gens_top1, ]
+map <- map - rowMeans(map)
+pheatmap(map, fontsize_col = 14, fontsize_row = 1, main = "Figure A7. Heatmap: COVID-19 vs Healthy", cex.main = 1.6, font.main = 2)
+
+## Bacterial vs Healthy analysis
+
+# Volcanoplot
+volcanoplot(ml2, 
+            coef = "BacterialvsHealthy", 
+            highlight = 10,
+            names = rownames(ml2$coefficients),
+            main = "Figure A8. Volcanoplot: Bacterial vs Healthy", cex.main = 1.4, font.main = 2)
+abline(v = c(-1.5, 1.5), col = "red", lty = 2)  # log2FC thresholds
+
+# Heatmap
+gens_top2 <- rownames(subset(bact_vs_health, (abs(logFC) > 1.5) & (adj.P.Val < 0.05)))
+
+library(pheatmap)
+map2 <- log_comptatges_norm2[gens_top2, ]
+map2 <- map2 - rowMeans(map2)
+pheatmap(map2, fontsize_col = 14, fontsize_row = 1, main =  "Figure A9. Heatmap: Bacterial vs Healthy", cex.main = 1.6, font.main = 2)
+```
+
+```{r, echo = FALSE, results='hold'}
+dotplot(egoda, showCategory=9, font.size=6) + ggtitle("Figure A10. Enriched biological processes identified by dotplot") + theme(plot.title = element_text(size = 16, face = "bold"))
+
+cnetplot(egoda, font.size=5) + ggtitle("Figure A11. Network of genes associated with enriched biological processes") + theme(plot.title = element_text(size = 16, face = "bold"))
+```
